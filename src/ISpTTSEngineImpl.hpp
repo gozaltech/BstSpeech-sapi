@@ -6,11 +6,8 @@
 #include <comdef.h>
 #include <comip.h>
 #include "com.hpp"
+#include "engine.hpp"
 #include "voice_attributes.hpp"
-
-#ifndef BUILD_X64
-#include "b32_wrapper.h"
-#endif
 
 namespace Bestspeech {
 namespace sapi {
@@ -47,15 +44,9 @@ private:
 
     ISpObjectTokenPtr token_;
     int voice_index_;
-#ifndef BUILD_X64
-    b32::StatePtr bst_state_;
-#endif
-};
 
-#ifdef BUILD_X64
-void InitPipeClient();
-void CleanupPipeClient();
-void ShutdownPipeServer();
-#endif
+    engine::handle engine_;
+    const engine::build_def* open_build_ = nullptr;
+};
 }
 }

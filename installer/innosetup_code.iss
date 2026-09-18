@@ -59,9 +59,11 @@ begin
     if not Exec(ExpandConstant('{sys}\regsvr32.exe'), '/s "' + ExpandConstant('{app}') + '\BestspeechSAPI.dll"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
       MsgBox('Failed to register x86 DLL', mbError, MB_OK);
 
+    { The x64 engine needs the 64-bit regsvr32, which a 32-bit installer
+      reaches through sysnative rather than sys or syswow64. }
     if IsWin64 and FileExists(ExpandConstant('{app}\x64\BestspeechSAPI.dll')) then
     begin
-      if not Exec(ExpandConstant('{syswow64}\regsvr32.exe'), '/s "' + ExpandConstant('{app}') + '\x64\BestspeechSAPI.dll"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      if not Exec(ExpandConstant('{sysnative}\regsvr32.exe'), '/s "' + ExpandConstant('{app}') + '\x64\BestspeechSAPI.dll"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
         MsgBox('Failed to register x64 DLL', mbError, MB_OK);
     end;
   end;
@@ -77,7 +79,7 @@ begin
 
     if IsWin64 and FileExists(ExpandConstant('{app}\x64\BestspeechSAPI.dll')) then
     begin
-      Exec(ExpandConstant('{syswow64}\regsvr32.exe'), '/s /u "' + ExpandConstant('{app}') + '\x64\BestspeechSAPI.dll"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Exec(ExpandConstant('{sysnative}\regsvr32.exe'), '/s /u "' + ExpandConstant('{app}') + '\x64\BestspeechSAPI.dll"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     end;
 
     Sleep(2000);

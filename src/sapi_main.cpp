@@ -5,13 +5,6 @@
 #include "ISpTTSEngineImpl.hpp"
 #include "IEnumSpObjectTokensImpl.hpp"
 
-#ifdef BUILD_X64
-#include "pipe_client.h"
-#else
-#include "b32_wrapper.h"
-#endif
-
-
 namespace {
 
 HINSTANCE g_dll_handle = nullptr;
@@ -59,12 +52,6 @@ BOOL APIENTRY DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID /*lpReserved*/
         g_dll_handle = hInstance;
         DisableThreadLibraryCalls(hInstance);
 
-#ifdef BUILD_X64
-        Bestspeech::sapi::InitPipeClient();
-#else
-        b32::set_hinstance(hInstance);
-#endif
-
         try {
             g_cls_obj_factory.register_class<Bestspeech::sapi::IEnumSpObjectTokensImpl>();
             g_cls_obj_factory.register_class<Bestspeech::sapi::ISpTTSEngineImpl>();
@@ -73,11 +60,6 @@ BOOL APIENTRY DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID /*lpReserved*/
             return FALSE;
         }
     }
-#ifdef BUILD_X64
-    else if (dwReason == DLL_PROCESS_DETACH) {
-        Bestspeech::sapi::CleanupPipeClient();
-    }
-#endif
     return TRUE;
 }
 
@@ -111,9 +93,6 @@ STDAPI DllRegisterServer()
 STDAPI DllUnregisterServer()
 {
     try {
-#ifdef BUILD_X64
-        Bestspeech::sapi::ShutdownPipeServer();
-#endif
         unregister_token_enumerator();
         Bestspeech::com::class_registrar r(g_dll_handle);
         r.unregister_class<Bestspeech::sapi::IEnumSpObjectTokensImpl>();

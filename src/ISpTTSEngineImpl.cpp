@@ -1,16 +1,9 @@
 #include <new>
 #include <string>
-#include <cmath>
 #include <algorithm>
 #include "utils.hpp"
 #include "ISpTTSEngineImpl.hpp"
 #include "debug_log.h"
-
-#ifdef BUILD_X64
-#include "pipe_client.h"
-#else
-#include "b32_wrapper.h"
-#endif
 
 namespace Bestspeech {
 namespace sapi {
@@ -18,39 +11,7 @@ namespace sapi {
 namespace {
 
 constexpr WORD AUDIO_CHANNELS = 1;
-constexpr DWORD AUDIO_SAMPLE_RATE = 11025;
 constexpr WORD AUDIO_BITS_PER_SAMPLE = 16;
-
-constexpr int MIN_RATE = -10;
-constexpr int MAX_RATE = 10;
-
-constexpr int NATIVE_RATE_MIN = -100;
-constexpr int NATIVE_RATE_MAX = 100;
-
-constexpr int FREQ_MIN = 45;
-constexpr int FREQ_MAX = 400;
-
-constexpr int VOICE_DEFAULT_FREQS[] = {
-    80,
-    175,
-    65,
-    150,
-    90,
-    115,
-    230,
-    60,
-    60,
-    80,
-    47,
-    350,
-    300,
-    60
-};
-constexpr int VOICE_COUNT = sizeof(VOICE_DEFAULT_FREQS) / sizeof(VOICE_DEFAULT_FREQS[0]);
-
-#ifdef BUILD_X64
-PipeClient* g_pipeClient = nullptr;
-#endif
 
 struct SpeakContext {
     ISpTTSEngineSite* caller = nullptr;
@@ -58,44 +19,27 @@ struct SpeakContext {
     bool aborted = false;
 };
 
-#ifdef BUILD_X64
-bool speak_callback(const char* data, uint32_t size, void* user) {
-#else
-bool speak_callback(const char* data, long size, void* user) {
-#endif
+bool speak_callback(const std::int16_t* samples, long count, void* user) {
     auto* ctx = static_cast<SpeakContext*>(user);
     if (!ctx || !ctx->caller) {
         DEBUG_LOG("SAPI Callback: ERROR - No context or caller");
         return false;
     }
 
-    const DWORD actions = ctx->caller->GetActions();
-    if (actions & SPVES_ABORT) {
-        DEBUG_LOG("SAPI Callback: ABORT requested");
-        ctx->aborted = true;
-        return false;
-    }
-    if (actions & SPVES_SKIP) {
-        DEBUG_LOG("SAPI Callback: SKIP requested");
-        ctx->caller->CompleteSkip(0);
-        ctx->aborted = true;
-        return false;
-    }
+    auto ptr = reinterpret_cast<const BYTE*>(samples);
+    ULONG remaining = static_cast<ULONG>(count) * sizeof(std::int16_t);
 
-    DEBUG_LOG("SAPI Callback: Writing %ld bytes to SAPI", (long)size);
-
-    auto ptr = reinterpret_cast<const BYTE*>(data);
-    ULONG remaining = static_cast<ULONG>(size);
+    DEBUG_LOG("SAPI Callback: Writing %lu bytes to SAPI", remaining);
 
     while (remaining > 0) {
         const DWORD actions = ctx->caller->GetActions();
         if (actions & SPVES_ABORT) {
-            DEBUG_LOG("SAPI Callback: ABORT during write");
+            DEBUG_LOG("SAPI Callback: ABORT requested");
             ctx->aborted = true;
             return false;
         }
         if (actions & SPVES_SKIP) {
-            DEBUG_LOG("SAPI Callback: SKIP during write");
+            DEBUG_LOG("SAPI Callback: SKIP requested");
             ctx->caller->CompleteSkip(0);
             ctx->aborted = true;
             return false;
@@ -116,32 +60,9 @@ bool speak_callback(const char* data, long size, void* user) {
         ptr += written;
     }
 
-    DEBUG_LOG("SAPI Callback: Successfully wrote %ld bytes", (long)size);
     return true;
 }
 }
-
-#ifdef BUILD_X64
-void InitPipeClient()
-{
-    if (!g_pipeClient) {
-        g_pipeClient = new PipeClient();
-    }
-}
-
-void CleanupPipeClient()
-{
-    delete g_pipeClient;
-    g_pipeClient = nullptr;
-}
-
-void ShutdownPipeServer()
-{
-    if (g_pipeClient) {
-        g_pipeClient->shutdownServer();
-    }
-}
-#endif
 
 ISpTTSEngineImpl::ISpTTSEngineImpl()
     : voice_index_(0)
@@ -174,31 +95,13 @@ STDMETHODIMP ISpTTSEngineImpl::SetObjectToken(ISpObjectToken* pToken)
 
         const std::string voice_name = utils::wstring_to_string(name.get());
         DEBUG_LOG("SetObjectToken: Voice name = %s", voice_name.c_str());
-        voice_index_ = 0;
 
-#ifdef BUILD_X64
-        if (g_pipeClient) {
-            std::vector<VoiceInfo> voices;
-            if (g_pipeClient->getVoices(voices)) {
-                for (size_t i = 0; i < voices.size(); ++i) {
-                    if (_stricmp(voices[i].name, voice_name.c_str()) == 0) {
-                        voice_index_ = static_cast<int>(i);
-                        break;
-                    }
-                }
-            }
-        }
-#else
-        for (int i = 0; i < bst_voice_count; ++i) {
-            if (_stricmp(bst_voices[i].name, voice_name.c_str()) == 0) {
-                voice_index_ = i;
-                break;
-            }
-        }
-#endif
+        const int found = engine::index_of(voice_name.c_str());
+        voice_index_ = found >= 0 ? found : 0;
 
         token_ = pToken;
-        DEBUG_LOG("SetObjectToken: SUCCESS - Voice index = %d", voice_index_);
+        DEBUG_LOG("SetObjectToken: SUCCESS - Voice index = %d (%s)", voice_index_,
+                  engine::voice(voice_index_).build->id);
         return S_OK;
     }
     catch (const std::bad_alloc&) {
@@ -259,7 +162,7 @@ STDMETHODIMP ISpTTSEngineImpl::GetOutputFormat(
 
     pwfex->wFormatTag = WAVE_FORMAT_PCM;
     pwfex->nChannels = AUDIO_CHANNELS;
-    pwfex->nSamplesPerSec = AUDIO_SAMPLE_RATE;
+    pwfex->nSamplesPerSec = engine::voice(voice_index_).build->sample_rate;
     pwfex->wBitsPerSample = AUDIO_BITS_PER_SAMPLE;
     pwfex->nBlockAlign = pwfex->nChannels * pwfex->wBitsPerSample / 8;
     pwfex->nAvgBytesPerSec = pwfex->nSamplesPerSec * pwfex->nBlockAlign;
@@ -290,49 +193,27 @@ STDMETHODIMP ISpTTSEngineImpl::Speak(
         return E_INVALIDARG;
     }
 
-#ifdef BUILD_X64
-    if (!g_pipeClient) {
-        return E_FAIL;
-    }
-#endif
-
     try {
-#ifndef BUILD_X64
-        if (!bst_state_) {
-            wchar_t dll_path[MAX_PATH];
-            HMODULE hm = nullptr;
+        const engine::voice_def& voice = engine::voice(voice_index_);
 
-            if (GetModuleHandleExW(
-                    GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                    reinterpret_cast<LPCWSTR>(&speak_callback), &hm)) {
-                GetModuleFileNameW(hm, dll_path, MAX_PATH);
-                wchar_t* last_slash = wcsrchr(dll_path, L'\\');
-                if (last_slash) {
-                    wcscpy_s(last_slash + 1, MAX_PATH - (last_slash - dll_path + 1), L"b32_tts.dll");
-                    bst_state_ = b32::init(dll_path);
-                }
-            }
-
-            if (!bst_state_) {
-                bst_state_ = b32::init(static_cast<const char*>(nullptr));
-            }
-
-            if (!bst_state_) {
+        if (!engine_ || open_build_ != voice.build) {
+            engine_ = engine::open(*voice.build);
+            if (!engine_) {
+                DEBUG_LOG("Speak: ERROR - Unable to open build %s", voice.build->id);
                 return E_FAIL;
             }
+            open_build_ = voice.build;
         }
-#endif
 
         long sapi_rate = 0;
         pOutputSite->GetRate(&sapi_rate);
 
         unsigned short sapi_volume = 100;
         pOutputSite->GetVolume(&sapi_volume);
-        int gain = static_cast<int>((sapi_volume - 100) * 0.5);
 
         DEBUG_LOG("=== New Speech Request ===");
-        DEBUG_LOG("Voice Index: %d", voice_index_);
-        DEBUG_LOG("SAPI Rate: %d, SAPI Volume: %u (Gain: %d)", (int)sapi_rate, sapi_volume, gain);
+        DEBUG_LOG("Voice: %s on %s", voice.name.c_str(), voice.build->id);
+        DEBUG_LOG("SAPI Rate: %d, SAPI Volume: %u", (int)sapi_rate, sapi_volume);
 
         ULONGLONG event_interest = 0;
         pOutputSite->GetEventInterest(&event_interest);
@@ -370,7 +251,6 @@ STDMETHODIMP ISpTTSEngineImpl::Speak(
             }
             if (actions & SPVES_VOLUME) {
                 pOutputSite->GetVolume(&sapi_volume);
-                gain = static_cast<int>((sapi_volume - 100) * 0.5);
             }
 
             DEBUG_LOG("Fragment eAction: %d (SPVA_Speak=0, SPVA_Silence=1, SPVA_Pronounce=2, SPVA_Bookmark=3, SPVA_SpellOut=4)",
@@ -425,8 +305,10 @@ STDMETHODIMP ISpTTSEngineImpl::Speak(
                 continue;
             }
 
-            const std::string text = utils::wstring_to_string(frag->pTextStart, frag->ulTextLen);
-            DEBUG_LOG("Fragment text: \"%s\"", text.c_str());
+            const std::string text = engine::encode(*voice.build, frag->pTextStart,
+                                                    frag->ulTextLen);
+            DEBUG_LOG("Fragment text: \"%s\" (code page %u)", text.c_str(),
+                      voice.build->code_page);
             if (text.empty()) {
                 DEBUG_LOG("Fragment skipped - empty after conversion");
                 continue;
@@ -480,100 +362,17 @@ STDMETHODIMP ISpTTSEngineImpl::Speak(
                 }
             }
 
-            int combined_rate = static_cast<int>(sapi_rate) + frag->State.RateAdj;
-            combined_rate = std::clamp(combined_rate, MIN_RATE, MAX_RATE);
+            engine::params p;
+            p.rate = static_cast<int>(sapi_rate) + frag->State.RateAdj;
+            p.pitch = frag->State.PitchAdj.MiddleAdj;
+            p.volume = std::clamp(static_cast<int>(sapi_volume) *
+                                  static_cast<int>(frag->State.Volume) / 100, 0, 100);
 
-            DEBUG_LOG("--- Rate Calculation ---");
-            DEBUG_LOG("  RateAdj: %d, Combined Rate: %d", frag->State.RateAdj, combined_rate);
+            DEBUG_LOG("--- Fragment Settings ---");
+            DEBUG_LOG("  Rate: %d (site %d + adj %d)", p.rate, (int)sapi_rate, frag->State.RateAdj);
+            DEBUG_LOG("  Pitch: %d, Volume: %d", p.pitch, p.volume);
 
-            const float speed_multiplier = std::pow(2.0f, static_cast<float>(combined_rate) / 8.0f);
-
-            DEBUG_LOG("  Speed Multiplier: %.2fx (2^(rate/8))", speed_multiplier);
-
-            int native_rate = 0;
-            float sonic_multiplier = 1.0f;
-
-            float desired_native_rate = -100.0f * std::log2(speed_multiplier);
-
-            if (desired_native_rate > NATIVE_RATE_MAX) {
-                native_rate = NATIVE_RATE_MAX;
-                sonic_multiplier = speed_multiplier / 0.5f;
-                DEBUG_LOG("  Mode: VERY SLOW - Native rate maxed at +%d, using Sonic %.2fx", native_rate, sonic_multiplier);
-            } else if (desired_native_rate < NATIVE_RATE_MIN) {
-                native_rate = NATIVE_RATE_MIN;
-                sonic_multiplier = speed_multiplier / 2.0f;
-                DEBUG_LOG("  Mode: VERY FAST - Native rate maxed at %d, using Sonic %.2fx", native_rate, sonic_multiplier);
-            } else {
-                native_rate = static_cast<int>(std::round(desired_native_rate));
-                sonic_multiplier = 1.0f;
-                DEBUG_LOG("  Mode: NORMAL - Using Native Rate Only (No Sonic)");
-                DEBUG_LOG("  Native Rate: %d", native_rate);
-            }
-
-            const int frag_gain = gain + static_cast<int>((frag->State.Volume - 100) * 0.5);
-
-            int default_freq = 100;
-            if (voice_index_ >= 0 && voice_index_ < VOICE_COUNT) {
-                default_freq = VOICE_DEFAULT_FREQS[voice_index_];
-            }
-
-            DEBUG_LOG("--- Pitch Calculation ---");
-            DEBUG_LOG("  Voice Default Frequency: %d Hz", default_freq);
-
-            const int pitch_val = frag->State.PitchAdj.MiddleAdj;
-            DEBUG_LOG("  SAPI Pitch Value: %d", pitch_val);
-
-            int frequency;
-            if (pitch_val < 0) {
-                const double ratio = (pitch_val + 25) / 25.0;
-                frequency = static_cast<int>(std::round(
-                    FREQ_MIN * std::pow(static_cast<double>(default_freq) / FREQ_MIN, ratio)
-                ));
-                DEBUG_LOG("  Mode: LOWER PITCH - Logarithmic scaling from %d to %d Hz", FREQ_MIN, default_freq);
-                DEBUG_LOG("  Ratio: %.2f", ratio);
-            } else if (pitch_val > 0) {
-                const double ratio = pitch_val / 25.0;
-                const double curved_ratio = std::pow(ratio, 1.5);
-                frequency = static_cast<int>(std::round(
-                    default_freq * std::pow(static_cast<double>(FREQ_MAX) / default_freq, curved_ratio)
-                ));
-                DEBUG_LOG("  Mode: HIGHER PITCH - Logarithmic scaling from %d to %d Hz", default_freq, FREQ_MAX);
-                DEBUG_LOG("  Ratio: %.2f, Curved: %.2f", ratio, curved_ratio);
-            } else {
-                frequency = default_freq;
-                DEBUG_LOG("  Mode: NATURAL PITCH - Using voice default");
-            }
-            DEBUG_LOG("  Final Frequency: %d Hz", frequency);
-
-            DEBUG_LOG("--- Final Values Summary ---");
-            DEBUG_LOG("  Native Rate: %d, Sonic: %.2fx, Gain: %d, Frequency: %d Hz",
-                      native_rate, sonic_multiplier, frag_gain, frequency);
-            DEBUG_LOG("===========================\n");
-
-#ifdef BUILD_X64
-            g_pipeClient->speak(
-                text.c_str(),
-                voice_index_,
-                native_rate,
-                sonic_multiplier,
-                frag_gain,
-                frequency,
-                speak_callback,
-                &ctx
-            );
-#else
-            b32::speak_async(
-                bst_state_.get(),
-                speak_callback,
-                &ctx,
-                text.c_str(),
-                voice_index_,
-                native_rate,
-                sonic_multiplier,
-                frag_gain,
-                frequency
-            );
-#endif
+            engine::speak(engine_.get(), voice, text.c_str(), p, speak_callback, &ctx);
 
             if (ctx.aborted) {
                 break;

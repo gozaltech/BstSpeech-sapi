@@ -77,9 +77,6 @@ echo Copying results to output directory...
 echo.
 
 copy /Y "%BUILD_DIR_X86%\bin\Release\BestspeechSAPI.dll" "%OUTPUT_DIR%\"
-copy /Y "%BUILD_DIR_X86%\bin\Release\BestspeechServer.exe" "%OUTPUT_DIR%\"
-copy /Y "%BUILD_DIR_X86%\bin\Release\b32_tts.dll" "%OUTPUT_DIR%\"
-
 copy /Y "%BUILD_DIR_X64%\bin\Release\BestspeechSAPI.dll" "%OUTPUT_DIR%\x64\"
 
 echo Building installer...

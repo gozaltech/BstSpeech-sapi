@@ -14,8 +14,9 @@ IEnumSpObjectTokensImpl::IEnumSpObjectTokensImpl(bool initialize)
         return;
     }
 
-    sapi_voices_.reserve(static_cast<size_t>(bst_voice_count));
-    for (int i = 0; i < bst_voice_count; ++i) {
+    const int count = engine::voice_count();
+    sapi_voices_.reserve(static_cast<size_t>(count));
+    for (int i = 0; i < count; ++i) {
         sapi_voices_.emplace_back(i);
     }
 }

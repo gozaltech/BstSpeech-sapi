@@ -1,13 +1,24 @@
 # BSTSpeech SAPI5 Wrapper
 
-A native Windows SAPI5 wrapper for the BSTSpeech text-to-speech engine, enabling BSTSpeech voices to work with any SAPI5-compatible application including screen readers (NVDA, JAWS, Windows Narrator) and book reader applications (Balabolka, Bookworm).
+A native Windows SAPI5 wrapper for the BeSTspeech text-to-speech engine, enabling BeSTspeech voices to work with any SAPI5-compatible application including screen readers (NVDA, JAWS, Windows Narrator) and book reader applications (Balabolka, Bookworm).
 
 > **Note:** This is early-stage software under active development. Some bugs and issues may be expected. Please report any problems you encounter!
 
+## The engine
+
+project uses [openbst](https://github.com/mudb0y/openbst)
+
+No longer using bridge for x64 architecture, x64 native binary is now built.
+
 ## Features
 
-- **Native x86 architecture Support and x64 support with bridge**
-- **SAPI5 Integration** - Works seamlessly with any SAPI5-compatible Windows application
+- **Native x86 and x64**
+- **88 voices across 13 languages**
+- **SAPI5 Integration**
+
+### Languages
+
+Arabic, Dutch, English, French, German, Greek, Hebrew, Italian, Japanese, Polish, Portuguese, Russian and Spanish. Each voice reports its own LCID, so applications pick the right one for the text they are reading.
 
 ## Download
 
@@ -23,6 +34,7 @@ build_all.bat
 - Windows 10 or later
 - Visual Studio 2022+
 - CMake 3.15+
+- Git (for the fetched dependencies)
 
 ## Contributing
 
